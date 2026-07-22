@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, 2024 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2023, 2025 Oracle and/or its affiliates. All rights reserved.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0, which is available at
@@ -26,6 +26,7 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.UriBuilder;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -50,6 +51,11 @@ public final class SSLParamConfigurator {
         private String sniHostNameHeader = null;
         private String sniHostPrecedence = null;
         private boolean setAlways = false;
+        private final SSLParamConfiguratorConfiguration configConfiguration;
+
+        public Builder(SSLParamConfiguratorConfiguration configuration) {
+            this.configConfiguration = configuration;
+        }
 
 
         /**
@@ -59,7 +65,7 @@ public final class SSLParamConfigurator {
          */
         public Builder request(ClientRequest clientRequest) {
             this.sniHostNameHeader = getSniHostNameHeader(clientRequest.getHeaders());
-            this.sniHostPrecedence = resolveSniHostNameProperty(clientRequest);
+            this.sniHostPrecedence = configConfiguration.resolveSniHostNameProperty(clientRequest);
             this.uri = clientRequest.getUri();
             return this;
         }
@@ -70,7 +76,7 @@ public final class SSLParamConfigurator {
          * @return the builder instance
          */
         public Builder configuration(Configuration configuration) {
-            this.sniHostPrecedence = getSniHostNameProperty(configuration);
+            this.sniHostPrecedence = this.configConfiguration.getSniHostNameProperty(configuration);
             return this;
         }
 
@@ -139,7 +145,7 @@ public final class SSLParamConfigurator {
          * @return the builder instance.
          */
         public Builder setSNIHostName(Configuration configuration) {
-            return setSNIHostName(getSniHostNameProperty(configuration));
+            return setSNIHostName(this.configConfiguration.getSniHostNameProperty(configuration));
         }
 
         /**
@@ -158,7 +164,7 @@ public final class SSLParamConfigurator {
          * @return the builder instance.
          */
         public Builder setSNIHostName(PropertiesResolver resolver) {
-            return setSNIHostName(resolveSniHostNameProperty(resolver));
+            return setSNIHostName(configConfiguration.resolveSniHostNameProperty(resolver));
         }
 
         /**
@@ -178,22 +184,6 @@ public final class SSLParamConfigurator {
             final String hostHeader = hostHeaders.get(0).toString();
             return hostHeader;
         }
-
-        private static String resolveSniHostNameProperty(PropertiesResolver resolver) {
-            String property = resolver.resolveProperty(ClientProperties.SNI_HOST_NAME, String.class);
-            if (property == null) {
-                property = resolver.resolveProperty(ClientProperties.SNI_HOST_NAME.toLowerCase(Locale.ROOT), String.class);
-            }
-            return property;
-        }
-
-        private static String getSniHostNameProperty(Configuration configuration) {
-            Object property = configuration.getProperty(ClientProperties.SNI_HOST_NAME);
-            if (property == null) {
-                property = configuration.getProperty(ClientProperties.SNI_HOST_NAME.toLowerCase(Locale.ROOT));
-            }
-            return (String) property;
-        }
     }
 
     private SSLParamConfigurator(SSLParamConfigurator.Builder builder) {
@@ -210,7 +200,14 @@ public final class SSLParamConfigurator {
      * Create a new instance of TlsSupport class
      **/
     public static SSLParamConfigurator.Builder builder() {
-        return new SSLParamConfigurator.Builder();
+        return new SSLParamConfigurator.Builder(DEFAULT_CONFIGURATION);
+    }
+
+    /**
+     * Create a new instance of TlsSupport class
+     **/
+    public static SSLParamConfigurator.Builder builder(SSLParamConfiguratorConfiguration configuration) {
+        return new SSLParamConfigurator.Builder(configuration);
     }
 
     /**
@@ -233,7 +230,9 @@ public final class SSLParamConfigurator {
         String host = uri.getHost();
         try {
             InetAddress ip = InetAddress.getByName(host);
-            return UriBuilder.fromUri(uri).host(ip.getHostAddress()).build();
+            // ipv6 is expected in square brackets in UriBuilder#host()
+            final String hostAddress = ip instanceof Inet6Address ? '[' + ip.getHostAddress() + ']' : ip.getHostAddress();
+            return UriBuilder.fromUri(uri).host(hostAddress).build();
         } catch (UnknownHostException e) {
             return uri;
         }
@@ -286,4 +285,25 @@ public final class SSLParamConfigurator {
         sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
         sslEngine.setSSLParameters(sslParameters);
     }
+
+    public static interface SSLParamConfiguratorConfiguration {
+        public default String getSniHostNameProperty(Configuration configuration) {
+            Object property = configuration.getProperty(ClientProperties.SNI_HOST_NAME);
+            if (property == null) {
+                property = configuration.getProperty(ClientProperties.SNI_HOST_NAME.toLowerCase(Locale.ROOT));
+            }
+            return (String) property;
+        }
+
+        public default String resolveSniHostNameProperty(PropertiesResolver resolver) {
+            String property = resolver.resolveProperty(ClientProperties.SNI_HOST_NAME, String.class);
+            if (property == null) {
+                property = resolver.resolveProperty(ClientProperties.SNI_HOST_NAME.toLowerCase(Locale.ROOT), String.class);
+            }
+            return property;
+        }
+    }
+
+    private static final SSLParamConfiguratorConfiguration DEFAULT_CONFIGURATION = new SSLParamConfiguratorConfiguration() {
+    };
 }

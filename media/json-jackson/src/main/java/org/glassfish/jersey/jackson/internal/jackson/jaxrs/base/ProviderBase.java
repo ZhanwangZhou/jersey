@@ -6,7 +6,10 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Type;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -18,9 +21,12 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.NoContentException;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.StreamingOutput;
+import javax.ws.rs.ext.ContextResolver;
 import javax.ws.rs.ext.MessageBodyReader;
 import javax.ws.rs.ext.MessageBodyWriter;
+import javax.ws.rs.ext.Providers;
 
+import com.fasterxml.jackson.core.PrettyPrinter;
 import org.glassfish.jersey.jackson.internal.jackson.jaxrs.cfg.AnnotationBundleKey;
 import org.glassfish.jersey.jackson.internal.jackson.jaxrs.cfg.Annotations;
 import org.glassfish.jersey.jackson.internal.jackson.jaxrs.cfg.EndpointConfigBase;
@@ -43,6 +49,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.util.LookupCache;
 import com.fasterxml.jackson.databind.util.LRUMap;
 import com.fasterxml.jackson.databind.type.TypeFactory;
 
@@ -186,14 +193,12 @@ public abstract class ProviderBase<
     /**
      * Cache for resolved endpoint configurations when reading JSON data
      */
-    protected final LRUMap<AnnotationBundleKey, EP_CONFIG> _readers
-            = new LRUMap<AnnotationBundleKey, EP_CONFIG>(16, 120);
+    protected final LookupCache<AnnotationBundleKey, EP_CONFIG> _readers;
 
     /**
      * Cache for resolved endpoint configurations when writing JSON data
      */
-    protected final LRUMap<AnnotationBundleKey, EP_CONFIG> _writers
-            = new LRUMap<AnnotationBundleKey, EP_CONFIG>(16, 120);
+    protected final LookupCache<AnnotationBundleKey, EP_CONFIG> _writers;
 
     /*
     /**********************************************************
@@ -202,8 +207,9 @@ public abstract class ProviderBase<
      */
 
     protected ProviderBase(MAPPER_CONFIG mconfig) {
-        _mapperConfig = mconfig;
-        _jaxRSFeatures = JAXRS_FEATURE_DEFAULTS;
+        this(mconfig,
+                new LRUMap<>(16, 120),
+                new LRUMap<>(16, 120));
     }
 
     /**
@@ -214,8 +220,20 @@ public abstract class ProviderBase<
      */
     @Deprecated // just to denote it should NOT be directly called; will NOT be removed
     protected ProviderBase() {
-        _mapperConfig = null;
+        this(null);
+    }
+
+    /**
+     * @since 2.17
+     */
+    protected ProviderBase(MAPPER_CONFIG mconfig,
+                           LookupCache<AnnotationBundleKey, EP_CONFIG> readerCache,
+                           LookupCache<AnnotationBundleKey, EP_CONFIG> writerCache)
+    {
+        _mapperConfig = mconfig;
         _jaxRSFeatures = JAXRS_FEATURE_DEFAULTS;
+        _readers = readerCache;
+        _writers = writerCache;
     }
 
     /*
@@ -601,7 +619,12 @@ public abstract class ProviderBase<
         try {
             // Want indentation?
             if (writer.isEnabled(SerializationFeature.INDENT_OUTPUT)) {
-                g.useDefaultPrettyPrinter();
+                PrettyPrinter defaultPrettyPrinter = writer.getConfig().getDefaultPrettyPrinter();
+                if (defaultPrettyPrinter != null) {
+                    g.setPrettyPrinter(defaultPrettyPrinter);
+                } else {
+                    g.useDefaultPrettyPrinter();
+                }
             }
             JavaType rootType = null;
 
@@ -987,6 +1010,24 @@ public abstract class ProviderBase<
     /* Private/sub-class helper methods
     /**********************************************************
      */
+
+    // @since 2.19
+    protected <OM extends ObjectMapper> OM _locateMapperViaProvider(Class<?> type, MediaType mediaType,
+                                                                    Class<OM> mapperType, Providers providers) {
+        if (providers != null) {
+            ContextResolver<OM> resolver = providers.getContextResolver(mapperType, mediaType);
+            // Above should work as is, but due to this bug
+            //   [https://jersey.dev.java.net/issues/show_bug.cgi?id=288]
+            // in Jersey, it doesn't. But this works until resolution of the issue:
+            if (resolver == null) {
+                resolver = providers.getContextResolver(mapperType, null);
+            }
+            if (resolver != null) {
+                return resolver.getContext(type);
+            }
+        }
+        return null;
+    }
 
     protected static boolean _containedIn(Class<?> mainType, HashSet<ClassKey> set)
     {

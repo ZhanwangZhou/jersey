@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2024 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025 Oracle and/or its affiliates. All rights reserved.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0, which is available at
@@ -57,11 +57,25 @@ public class NettyClientProperties {
 
     /**
      * <p>
+     *     The implementation of custom {@link NettyHttpRedirectController} redirect logic.
+     * </p>
+     *
+     * @since 2.47
+     */
+    public static final String HTTP_REDIRECT_CONTROLLER = "jersey.config.client.netty.http.redirect.controller";
+
+    /**
+     * <p>
      *    This property determines the number of seconds the idle connections are kept in the pool before pruned.
      *    The default is 60. Specify 0 to disable.
      *  </p>
      */
     public static final String IDLE_CONNECTION_PRUNE_TIMEOUT = "jersey.config.client.idleConnectionPruneTimeout";
+
+    /**
+     * Enable or disable the Netty logging by {@code LoggingHandler(Level.DEBUG)}. Disabled by default.
+     */
+    public static final String LOGGING_ENABLED = "jersey.config.client.netty.loggingEnabled";
 
     /**
      *  <p>
@@ -148,7 +162,8 @@ public class NettyClientProperties {
         DEFAULT_HEADER_SIZE = 8192;
 
     /**
-     * Parameter which allows extending of the initial line length for the Netty connector
+     * Parameter which allows extending of the first line length of the HTTP header for the Netty connector.
+     * Taken from {@link io.netty.handler.codec.http.HttpClientCodec#HttpClientCodec(int, int, int)}.
      *
      * @since 2.44
      */
@@ -157,12 +172,12 @@ public class NettyClientProperties {
 
     /**
      * Default initial line length for Netty Connector.
-     * Taken from {@link io.netty.handler.codec.http.HttpClientCodec#HttpClientCodec(int, int, int)}
+     * Typically, set this to the same value as {@link #MAX_HEADER_SIZE}.
      *
      * @since 2.44
      */
     public static final Integer
-        DEFAULT_INITIAL_LINE_LENGTH = 4096;
+        DEFAULT_INITIAL_LINE_LENGTH = 8192;
 
     /**
      * Parameter which allows extending of the chunk size for the Netty connector
